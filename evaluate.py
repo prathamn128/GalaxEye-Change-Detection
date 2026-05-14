@@ -10,8 +10,10 @@ import os
 import argparse
 import json
 import torch
+import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+from scipy import ndimage
 
 from src.dataset import ChangeDetectionDataset
 from src.model import build_model
@@ -21,9 +23,35 @@ from src.utils import load_config, set_seed, get_device, load_checkpoint, ensure
 from src.visualize import plot_qualitative, plot_confusion_matrix
 
 
+def postprocess_mask(pred_binary, min_size=50):
+    """Remove small connected components (false positives) from binary mask."""
+    struct = ndimage.generate_binary_structure(2, 1)
+    cleaned = ndimage.binary_opening(pred_binary, structure=struct, iterations=1)
+    labeled, num_features = ndimage.label(cleaned)
+    if num_features == 0:
+        return cleaned.astype(np.float32)
+    component_sizes = ndimage.sum(cleaned, labeled, range(1, num_features + 1))
+    for i, size in enumerate(component_sizes):
+        if size < min_size:
+            cleaned[labeled == (i + 1)] = 0
+    return cleaned.astype(np.float32)
+
+
 @torch.no_grad()
-def evaluate_split(model, loader, criterion, device, threshold, split_name, config):
-    """Evaluate model on a data split."""
+def tta_predict(model, images, device):
+    """Test-Time Augmentation: average predictions over flips."""
+    logits_orig = model(images)
+    probs_orig = torch.sigmoid(logits_orig)
+    images_hflip = torch.flip(images, dims=[3])
+    probs_hflip = torch.sigmoid(torch.flip(model(images_hflip), dims=[3]))
+    images_vflip = torch.flip(images, dims=[2])
+    probs_vflip = torch.sigmoid(torch.flip(model(images_vflip), dims=[2]))
+    return (probs_orig + probs_hflip + probs_vflip) / 3.0
+
+@torch.no_grad()
+def evaluate_split(model, loader, criterion, device, threshold, split_name, config,
+                   use_tta=False, use_postprocess=False, min_component_size=50):
+    """Evaluate model on a data split with optional TTA and post-processing."""
     model.eval()
     metrics_calc = MetricsCalculator(threshold=threshold)
     total_loss = 0.0
@@ -37,10 +65,30 @@ def evaluate_split(model, loader, criterion, device, threshold, split_name, conf
         masks = batch["mask"].to(device)
         filenames = batch["filename"]
 
-        logits = model(images)
+        # Get predictions (with or without TTA)
+        if use_tta:
+            avg_probs = tta_predict(model, images, device)
+            avg_probs_clamped = torch.clamp(avg_probs, 1e-6, 1 - 1e-6)
+            logits = torch.log(avg_probs_clamped / (1 - avg_probs_clamped))
+        else:
+            logits = model(images)
+
         loss = criterion(logits, masks)
         total_loss += loss.item()
-        metrics_calc.update(logits, masks)
+
+        # Apply post-processing if enabled
+        if use_postprocess:
+            probs = torch.sigmoid(logits)
+            binary = (probs > threshold).float()
+            for b_idx in range(binary.size(0)):
+                mask_np = binary[b_idx, 0].cpu().numpy()
+                cleaned = postprocess_mask(mask_np, min_size=min_component_size)
+                binary[b_idx, 0] = torch.from_numpy(cleaned)
+            binary_clamped = torch.clamp(binary, 0.01, 0.99)
+            clean_logits = torch.log(binary_clamped / (1 - binary_clamped))
+            metrics_calc.update(clean_logits.to(device), masks)
+        else:
+            metrics_calc.update(logits, masks)
 
         # Save qualitative examples
         if qual_count < num_qual:
@@ -93,6 +141,9 @@ def main():
     parser.add_argument("--weights", default=None, help="Path to model weights")
     parser.add_argument("--threshold", type=float, default=None)
     parser.add_argument("--split", default="both", choices=["val", "test", "both"])
+    parser.add_argument("--no-tta", action="store_true", help="Disable TTA")
+    parser.add_argument("--no-postprocess", action="store_true", help="Disable post-processing")
+    parser.add_argument("--min-size", type=int, default=50, help="Min component size")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -139,7 +190,9 @@ def main():
 
     # Get threshold
     threshold = args.threshold or checkpoint.get("threshold", 0.5)
-    print(f"[EVAL] Using threshold: {threshold:.2f}")
+    use_tta = not args.no_tta
+    use_pp = not args.no_postprocess
+    print(f"[EVAL] Threshold: {threshold:.2f} | TTA: {use_tta} | Post-process: {use_pp} (min_size={args.min_size})")
 
     criterion = build_loss(config)
 
@@ -147,14 +200,16 @@ def main():
 
     if args.split in ["val", "both"]:
         val_loss, val_metrics, val_cm, val_quals = evaluate_split(
-            model, val_loader, criterion, device, threshold, "val", config
+            model, val_loader, criterion, device, threshold, "val", config,
+            use_tta=use_tta, use_postprocess=use_pp, min_component_size=args.min_size
         )
         print_metrics("Validation", val_loss, val_metrics, val_cm)
         results["val"] = {"loss": val_loss, **val_metrics}
 
     if args.split in ["test", "both"]:
         test_loss, test_metrics, test_cm, test_quals = evaluate_split(
-            model, test_loader, criterion, device, threshold, "test", config
+            model, test_loader, criterion, device, threshold, "test", config,
+            use_tta=use_tta, use_postprocess=use_pp, min_component_size=args.min_size
         )
         print_metrics("Test", test_loss, test_metrics, test_cm)
         results["test"] = {"loss": test_loss, **test_metrics}

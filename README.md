@@ -32,11 +32,11 @@ Place the downloaded file at `weights/best_model.pth` before running evaluation 
 
 | Metric    | Value  |
 |-----------|--------|
-| **IoU**       | 0.0155 |
-| **Precision** | 0.0158 |
-| **Recall**    | 0.4296 |
-| F1 Score  | 0.0306 |
-| Accuracy  | 0.7953 |
+| **IoU**       | 0.0156 |
+| **Precision** | 0.0159 |
+| **Recall**    | 0.4158 |
+| F1 Score  | 0.0307 |
+| Accuracy  | 0.8027 |
 
 ### Validation Set Metrics
 
