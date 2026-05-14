@@ -1,0 +1,74 @@
+# ============================================================
+# GalaxEye Change Detection - Configuration
+# ============================================================
+
+# --- Paths ---
+data:
+  root: "data"
+  train_dir: "data/train"
+  val_dir: "data/val"
+  test_dir: "data/test"
+
+output:
+  dir: "outputs"
+  weights_dir: "weights"
+  report_dir: "report"
+  best_model: "weights/best_model.pth"
+
+# --- Model ---
+model:
+  architecture: "Unet"                  # Unet, UnetPlusPlus, FPN, etc.
+  encoder_name: "resnet34"              # resnet34, efficientnet-b0, etc.
+  encoder_weights: "imagenet"           # pretrained weights
+  in_channels: 4                        # auto-adjusted: 3 (EO pre) + 1 (SAR post)
+  classes: 1                            # binary segmentation
+  activation: null                      # use BCEWithLogitsLoss (no sigmoid)
+
+# --- Training ---
+training:
+  seed: 42
+  epochs: 8
+  batch_size: 8
+  num_workers: 0                        # 0 for Windows compatibility
+  learning_rate: 0.0005
+  weight_decay: 0.0001
+  scheduler: "cosine"                   # cosine, step, plateau
+  scheduler_params:
+    T_max: 8
+    eta_min: 0.000001
+  early_stopping:
+    patience: 8
+    min_delta: 0.001
+  mixed_precision: true                 # auto-fallback for CPU
+  gradient_clip: 1.0
+
+# --- Loss ---
+loss:
+  bce_weight: 0.3
+  dice_weight: 0.7
+  pos_weight: 5.0                       # handle severe class imbalance (~2.4% change pixels)
+
+# --- Data ---
+dataset:
+  img_size: 128
+  augmentation: true
+  label_remap:
+    0: 0     # Background -> No Change
+    1: 0     # Intact -> No Change
+    2: 1     # Damaged -> Change
+    3: 1     # Destroyed -> Change
+
+# --- Evaluation ---
+evaluation:
+  threshold: 0.55
+  threshold_search:
+    enabled: true
+    min: 0.1
+    max: 0.9
+    step: 0.05
+  num_qualitative: 8                    # number of qualitative examples to save
+
+# --- Logging ---
+logging:
+  print_freq: 10                        # print every N batches
+  save_freq: 5                          # save checkpoint every N epochs

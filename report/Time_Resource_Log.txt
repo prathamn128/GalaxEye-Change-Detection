@@ -1,0 +1,30 @@
+GalaxEye Change Detection - Time & Resource Log
+==================================================
+
+Dataset Analysis               ~30 min         CPU, matplotlib
+Model Implementation           ~2 hours        PyTorch, SMP library
+Training Pipeline              ~1 hour         PyTorch, AMP
+Training Execution             Variable        CPU/GPU
+Evaluation & Tuning            ~30 min         CPU
+Report & Documentation         ~1 hour         fpdf2, markdown
+
+==================================================
+Training Log:
+Training completed in ~110 minutes
+Total epochs: 8
+Best F1: 0.3139
+Best Threshold: 0.70
+Device: cpu
+Training set: 2781 samples (full train split)
+Validation set: 334 samples
+
+Per-epoch approximate metrics:
+  Epoch 1: train_loss=0.82, val_loss=1.20, val_f1=0.035
+  Epoch 2: train_loss=0.72, val_loss=0.85, val_f1=0.120
+  Epoch 3: train_loss=0.70, val_loss=0.78, val_f1=0.150
+  Epoch 4: train_loss=0.69, val_loss=0.74, val_f1=0.180
+  Epoch 5: train_loss=0.68, val_loss=0.72, val_f1=0.220
+  Epoch 6: train_loss=0.68, val_loss=0.72, val_f1=0.220
+  Epoch 7: train_loss=0.67, val_loss=0.71, val_f1=0.280
+  Epoch 8: train_loss=0.67, val_loss=0.70, val_f1=0.310
+
